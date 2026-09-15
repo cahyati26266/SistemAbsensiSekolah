@@ -1,0 +1,3141 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Absensi Sekolah - Full Coding ESP32</title>
+<style>
+
+    body {
+        margin: 0;
+        background: #000000;
+        font-family: Arial, Helvetica, sans-serif;
+        color: #ffffff;
+    }
+
+    header {
+        background: #00979D;
+        color: white;
+        padding: 18px 24px;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        box-shadow: 0 2px 6px rgba(0,0,0,.2);
+    }
+
+    header h1 {
+        margin: 0 0 5px;
+        font-size: 21px;
+    }
+
+    header p {
+        margin: 0;
+        font-size: 13px;
+        opacity: .95;
+    }
+
+    .container {
+        padding: 18px;
+    }
+
+    .info {
+        margin-bottom: 12px;
+        background: #111111;
+        border: 1px solid #333333;
+        padding: 10px 13px;
+        font-size: 13px;
+        box-shadow: 0 1px 2px rgba(0,0,0,.12);
+    }
+
+    .code-box {
+        background: #000000;
+        border: 1px solid #444444;
+        border-radius: 2px;
+        overflow: auto;
+        box-shadow: 0 2px 5px rgba(0,0,0,.18);
+    }
+
+    pre {
+        margin: 0;
+        padding: 18px 20px;
+        min-width: max-content;
+        color: #ffffff;
+        font-family: "Courier New", Consolas, monospace;
+        font-size: 14px;
+        line-height: 1.5;
+        tab-size: 4;
+        white-space: pre;
+    }
+
+    /* Warna sintaks bergaya Arduino IDE */
+    .arduino-comment { color: #008000; }
+    .arduino-keyword { color: #7f0055; font-weight: 600; }
+    .arduino-type { color: #0000ff; }
+    .arduino-string { color: #a31515; }
+    .arduino-number { color: #0000ff; }
+    .arduino-preproc { color: #800080; }
+    .arduino-function { color: #795e26; }
+</style>
+</head>
+<body>
+<header>
+    <h1>Absensi Sekolah Berbasis IoT - Full Coding ESP32</h1>
+    <p>Seluruh kode dari file Arduino/C++ ditampilkan di halaman ini.</p>
+</header>
+
+<div class="container">
+
+    <div class="code-box">
+        <pre><code><span class="arduino-comment">/*
+   ============================================================
+        SISTEM ABSENSI SEKOLAH BERBASIS IoT - ESP32 V3
+   ============================================================
+
+   Hardware:
+   - ESP32
+   - Fingerprint AS608
+   - LCD I2C 16x2
+   - Buzzer
+   - LED Hijau
+   - LED Merah
+
+   Fitur:
+   - Access Point
+   - WiFi STA untuk NTP
+   - NTP WIB UTC+7
+   - Tambah siswa
+   - Hapus siswa
+   - Enroll fingerprint
+   - Absensi fingerprint
+   - Hadir / Terlambat
+   - Rekap harian
+   - Rekap per siswa
+   - Rekap bulanan
+   - Pengaturan jam masuk
+   - Penyimpanan LittleFS
+
+   PIN:
+   AS608 TX -&amp;gt; GPIO 16
+   AS608 RX -&amp;gt; GPIO 17
+   LCD SDA  -&amp;gt; GPIO 21
+   LCD SCL  -&amp;gt; GPIO 22
+   Buzzer   -&amp;gt; GPIO 25
+   LED Hijau-&amp;gt; GPIO 26
+   LED Merah-&amp;gt; GPIO 27
+*/</span>
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// LIBRARY</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-preproc">#include &amp;lt;WiFi.h&amp;gt;</span>
+<span class="arduino-preproc">#include &amp;lt;WebServer.h&amp;gt;</span>
+<span class="arduino-preproc">#include &amp;lt;LittleFS.h&amp;gt;</span>
+<span class="arduino-preproc">#include &amp;lt;ArduinoJson.h&amp;gt;</span>
+<span class="arduino-preproc">#include &amp;lt;Wire.h&amp;gt;</span>
+<span class="arduino-preproc">#include &amp;lt;LiquidCrystal_I2C.h&amp;gt;</span>
+<span class="arduino-preproc">#include &amp;lt;Adafruit_Fingerprint.h&amp;gt;</span>
+<span class="arduino-preproc">#include &amp;lt;time.h&amp;gt;</span>
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// PIN</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-preproc">#define FP_RX 16</span>
+<span class="arduino-preproc">#define FP_TX 17</span>
+
+<span class="arduino-preproc">#define BUZZER_PIN 25</span>
+<span class="arduino-preproc">#define LED_GREEN 26</span>
+<span class="arduino-preproc">#define LED_RED 27</span>
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// WIFI</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-comment">// Access Point ESP32</span>
+<span class="arduino-keyword">const</span> <span class="arduino-keyword">char</span>* AP_SSID = <span class="arduino-string">"ABSENSI-ESP"</span>;
+<span class="arduino-keyword">const</span> <span class="arduino-keyword">char</span>* AP_PASSWORD = <span class="arduino-string">"12345678"</span>;
+
+<span class="arduino-comment">// WiFi sekolah untuk NTP</span>
+<span class="arduino-comment">// Isi sesuai WiFi sekolah.</span>
+<span class="arduino-comment">// Jika tidak ingin memakai STA, biarkan kosong.</span>
+<span class="arduino-keyword">const</span> <span class="arduino-keyword">char</span>* WIFI_SSID = <span class="arduino-string">"ELEKTRONIKA-LAB"</span>;
+<span class="arduino-keyword">const</span> <span class="arduino-keyword">char</span>* WIFI_PASSWORD = <span class="arduino-string">"lab@elektro#01"</span>;
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// NTP</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">const</span> <span class="arduino-keyword">char</span>* NTP_SERVER_1 = <span class="arduino-string">"pool.ntp.org"</span>;
+<span class="arduino-keyword">const</span> <span class="arduino-keyword">char</span>* NTP_SERVER_2 = <span class="arduino-string">"time.google.com"</span>;
+
+<span class="arduino-comment">// WIB = UTC+7</span>
+<span class="arduino-keyword">const</span> <span class="arduino-keyword">long</span> GMT_OFFSET_SEC = <span class="arduino-number">7</span> * <span class="arduino-number">3600</span>;
+<span class="arduino-keyword">const</span> <span class="arduino-keyword">int</span> DAYLIGHT_OFFSET_SEC = <span class="arduino-number">0</span>;
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// DEFAULT JAM MASUK</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">int</span> jamMasuk = <span class="arduino-number">6</span>;
+<span class="arduino-keyword">int</span> menitMasuk = <span class="arduino-number">30</span>;
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// FILE LITTLEFS</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-preproc">#define FILE_STUDENTS <span class="arduino-string">"/students.json"</span></span>
+<span class="arduino-preproc">#define FILE_SETTINGS <span class="arduino-string">"/settings.json"</span></span>
+<span class="arduino-preproc">#define FILE_ATTENDANCE <span class="arduino-string">"/attendance.csv"</span></span>
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// OBJECT</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-type">HardwareSerial</span> FingerSerial(<span class="arduino-number">2</span>);
+<span class="arduino-type">Adafruit_Fingerprint</span> finger = <span class="arduino-type">Adafruit_Fingerprint</span>(&amp;FingerSerial);
+
+<span class="arduino-type">LiquidCrystal_I2C</span> lcd(<span class="arduino-number">0x27</span>, <span class="arduino-number">16</span>, <span class="arduino-number">2</span>);
+
+<span class="arduino-type">WebServer</span> server(<span class="arduino-number">80</span>);
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// DATA SISWA</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">struct</span> Student {
+  <span class="arduino-keyword">int</span> id;
+  <span class="arduino-keyword">String</span> name;
+};
+
+<span class="arduino-keyword">const</span> <span class="arduino-keyword">int</span> MAX_STUDENTS = <span class="arduino-number">100</span>;
+
+Student students[MAX_STUDENTS];
+<span class="arduino-keyword">int</span> studentCount = <span class="arduino-number">0</span>;
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// STATUS ENROLL</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">bool</span> enrollmentRunning = <span class="arduino-keyword">false</span>;
+<span class="arduino-keyword">int</span> enrollmentID = -<span class="arduino-number">1</span>;
+<span class="arduino-keyword">String</span> enrollmentName = <span class="arduino-string">""</span>;
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// HELPER</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">String</span> twoDigit(<span class="arduino-keyword">int</span> value) {
+  <span class="arduino-keyword">if</span> (value &lt; <span class="arduino-number">10</span>) <span class="arduino-keyword">return</span> <span class="arduino-string">"0"</span> + <span class="arduino-keyword">String</span>(value);
+  <span class="arduino-keyword">return</span> <span class="arduino-keyword">String</span>(value);
+}
+
+<span class="arduino-keyword">String</span> getDate() {
+  <span class="arduino-keyword">struct</span> tm timeinfo;
+
+  <span class="arduino-keyword">if</span> (!getLocalTime(&amp;timeinfo)) {
+    <span class="arduino-keyword">return</span> <span class="arduino-string">"0000-00-00"</span>;
+  }
+
+  <span class="arduino-keyword">return</span> <span class="arduino-keyword">String</span>(timeinfo.tm_year + <span class="arduino-number">1900</span>) + <span class="arduino-string">"-"</span> +
+         twoDigit(timeinfo.tm_mon + <span class="arduino-number">1</span>) + <span class="arduino-string">"-"</span> +
+         twoDigit(timeinfo.tm_mday);
+}
+
+<span class="arduino-keyword">String</span> getTimeNow() {
+  <span class="arduino-keyword">struct</span> tm timeinfo;
+
+  <span class="arduino-keyword">if</span> (!getLocalTime(&amp;timeinfo)) {
+    <span class="arduino-keyword">return</span> <span class="arduino-string">"00:00:00"</span>;
+  }
+
+  <span class="arduino-keyword">return</span> twoDigit(timeinfo.tm_hour) + <span class="arduino-string">":"</span> +
+         twoDigit(timeinfo.tm_min) + <span class="arduino-string">":"</span> +
+         twoDigit(timeinfo.tm_sec);
+}
+
+<span class="arduino-keyword">String</span> getMonth() {
+  <span class="arduino-keyword">struct</span> tm timeinfo;
+
+  <span class="arduino-keyword">if</span> (!getLocalTime(&amp;timeinfo)) {
+    <span class="arduino-keyword">return</span> <span class="arduino-string">"0000-00"</span>;
+  }
+
+  <span class="arduino-keyword">return</span> <span class="arduino-keyword">String</span>(timeinfo.tm_year + <span class="arduino-number">1900</span>) + <span class="arduino-string">"-"</span> +
+         twoDigit(timeinfo.tm_mon + <span class="arduino-number">1</span>);
+}
+
+<span class="arduino-keyword">bool</span> isTimeLate() {
+  <span class="arduino-keyword">struct</span> tm timeinfo;
+
+  <span class="arduino-keyword">if</span> (!getLocalTime(&amp;timeinfo)) {
+    <span class="arduino-keyword">return</span> <span class="arduino-keyword">false</span>;
+  }
+
+  <span class="arduino-keyword">int</span> currentMinutes =
+      timeinfo.tm_hour * <span class="arduino-number">60</span> + timeinfo.tm_min;
+
+  <span class="arduino-keyword">int</span> limitMinutes =
+      jamMasuk * <span class="arduino-number">60</span> + menitMasuk;
+
+  <span class="arduino-keyword">return</span> currentMinutes &gt; limitMinutes;
+}
+
+<span class="arduino-keyword">String</span> getAttendanceStatus() {
+  <span class="arduino-keyword">if</span> (isTimeLate()) {
+    <span class="arduino-keyword">return</span> <span class="arduino-string">"Terlambat"</span>;
+  }
+
+  <span class="arduino-keyword">return</span> <span class="arduino-string">"Hadir"</span>;
+}
+
+<span class="arduino-keyword">int</span> findStudentByID(<span class="arduino-keyword">int</span> id) {
+
+  <span class="arduino-keyword">for</span> (<span class="arduino-keyword">int</span> i = <span class="arduino-number">0</span>; i &lt; studentCount; i++) {
+
+    <span class="arduino-keyword">if</span> (students[i].id == id) {
+      <span class="arduino-keyword">return</span> i;
+    }
+  }
+
+  <span class="arduino-keyword">return</span> -<span class="arduino-number">1</span>;
+}
+
+<span class="arduino-keyword">String</span> jsonEscape(<span class="arduino-keyword">String</span> input) {
+
+  input.replace(<span class="arduino-string">"\\"</span>, <span class="arduino-string">"\\\\"</span>);
+  input.replace(<span class="arduino-string">"\""</span>, <span class="arduino-string">"\\\""</span>);
+  input.replace(<span class="arduino-string">"\n"</span>, <span class="arduino-string">"\\n"</span>);
+  input.replace(<span class="arduino-string">"\r"</span>, <span class="arduino-string">""</span>);
+
+  <span class="arduino-keyword">return</span> input;
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// LCD</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">void</span> lcdMessage(<span class="arduino-keyword">String</span> line1, <span class="arduino-keyword">String</span> line2) {
+
+  lcd.clear();
+
+  lcd.setCursor(<span class="arduino-number">0</span>, <span class="arduino-number">0</span>);
+  lcd.print(line1.substring(<span class="arduino-number">0</span>, <span class="arduino-number">16</span>));
+
+  lcd.setCursor(<span class="arduino-number">0</span>, <span class="arduino-number">1</span>);
+  lcd.print(line2.substring(<span class="arduino-number">0</span>, <span class="arduino-number">16</span>));
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// LED / BUZZER</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">void</span> successSignal() {
+
+  <span class="arduino-function">digitalWrite</span>(LED_GREEN, HIGH);
+  <span class="arduino-function">digitalWrite</span>(LED_RED, LOW);
+
+  <span class="arduino-function">tone</span>(BUZZER_PIN, <span class="arduino-number">2000</span>, <span class="arduino-number">150</span>);
+
+  <span class="arduino-function">delay</span>(<span class="arduino-number">700</span>);
+
+  <span class="arduino-function">digitalWrite</span>(LED_GREEN, LOW);
+}
+
+<span class="arduino-keyword">void</span> failedSignal() {
+
+  <span class="arduino-function">digitalWrite</span>(LED_GREEN, LOW);
+  <span class="arduino-function">digitalWrite</span>(LED_RED, HIGH);
+
+  <span class="arduino-function">tone</span>(BUZZER_PIN, <span class="arduino-number">500</span>, <span class="arduino-number">400</span>);
+
+  <span class="arduino-function">delay</span>(<span class="arduino-number">700</span>);
+
+  <span class="arduino-function">digitalWrite</span>(LED_RED, LOW);
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// SETTINGS</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">void</span> loadSettings() {
+
+  <span class="arduino-keyword">if</span> (!LittleFS.exists(FILE_SETTINGS)) {
+    <span class="arduino-keyword">return</span>;
+  }
+
+  <span class="arduino-type">File</span> file = LittleFS.open(FILE_SETTINGS, <span class="arduino-string">"r"</span>);
+
+  <span class="arduino-keyword">if</span> (!file) <span class="arduino-keyword">return</span>;
+
+  <span class="arduino-type">DynamicJsonDocument</span> doc(<span class="arduino-number">1024</span>);
+
+  <span class="arduino-type">DeserializationError</span> error =
+      deserializeJson(doc, file);
+
+  file.close();
+
+  <span class="arduino-keyword">if</span> (!error) {
+
+    jamMasuk =
+        doc[<span class="arduino-string">"jamMasuk"</span>] | <span class="arduino-number">6</span>;
+
+    menitMasuk =
+        doc[<span class="arduino-string">"menitMasuk"</span>] | <span class="arduino-number">30</span>;
+  }
+}
+
+<span class="arduino-keyword">void</span> saveSettings() {
+
+  <span class="arduino-type">DynamicJsonDocument</span> doc(<span class="arduino-number">1024</span>);
+
+  doc[<span class="arduino-string">"jamMasuk"</span>] = jamMasuk;
+  doc[<span class="arduino-string">"menitMasuk"</span>] = menitMasuk;
+
+  <span class="arduino-type">File</span> file =
+      LittleFS.open(FILE_SETTINGS, <span class="arduino-string">"w"</span>);
+
+  <span class="arduino-keyword">if</span> (!file) <span class="arduino-keyword">return</span>;
+
+  serializeJson(doc, file);
+
+  file.close();
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// STUDENT DATABASE</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">void</span> loadStudents() {
+
+  studentCount = <span class="arduino-number">0</span>;
+
+  <span class="arduino-keyword">if</span> (!LittleFS.exists(FILE_STUDENTS)) {
+    <span class="arduino-keyword">return</span>;
+  }
+
+  <span class="arduino-type">File</span> file =
+      LittleFS.open(FILE_STUDENTS, <span class="arduino-string">"r"</span>);
+
+  <span class="arduino-keyword">if</span> (!file) <span class="arduino-keyword">return</span>;
+
+  <span class="arduino-type">DynamicJsonDocument</span> doc(<span class="arduino-number">10000</span>);
+
+  <span class="arduino-type">DeserializationError</span> error =
+      deserializeJson(doc, file);
+
+  file.close();
+
+  <span class="arduino-keyword">if</span> (error) {
+    <span class="arduino-keyword">return</span>;
+  }
+
+  <span class="arduino-type">JsonArray</span> arr = doc.as&lt;<span class="arduino-type">JsonArray</span>&gt;();
+
+  <span class="arduino-keyword">for</span> (<span class="arduino-type">JsonObject</span> obj : arr) {
+
+    <span class="arduino-keyword">if</span> (studentCount &gt;= MAX_STUDENTS) {
+      <span class="arduino-keyword">break</span>;
+    }
+
+    students[studentCount].id =
+        obj[<span class="arduino-string">"id"</span>] | <span class="arduino-number">0</span>;
+
+    students[studentCount].name =
+        <span class="arduino-keyword">String</span>(obj[<span class="arduino-string">"name"</span>] | <span class="arduino-string">""</span>);
+
+    studentCount++;
+  }
+}
+
+<span class="arduino-keyword">void</span> saveStudents() {
+
+  <span class="arduino-type">DynamicJsonDocument</span> doc(<span class="arduino-number">12000</span>);
+
+  <span class="arduino-type">JsonArray</span> arr = doc.to&lt;<span class="arduino-type">JsonArray</span>&gt;();
+
+  <span class="arduino-keyword">for</span> (<span class="arduino-keyword">int</span> i = <span class="arduino-number">0</span>; i &lt; studentCount; i++) {
+
+    <span class="arduino-type">JsonObject</span> obj = arr.createNestedObject();
+
+    obj[<span class="arduino-string">"id"</span>] = students[i].id;
+    obj[<span class="arduino-string">"name"</span>] = students[i].name;
+  }
+
+  <span class="arduino-type">File</span> file =
+      LittleFS.open(FILE_STUDENTS, <span class="arduino-string">"w"</span>);
+
+  <span class="arduino-keyword">if</span> (!file) <span class="arduino-keyword">return</span>;
+
+  serializeJson(doc, file);
+
+  file.close();
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// ATTENDANCE DATABASE</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">void</span> createAttendanceFile() {
+
+  <span class="arduino-keyword">if</span> (!LittleFS.exists(FILE_ATTENDANCE)) {
+
+    <span class="arduino-type">File</span> file =
+        LittleFS.open(FILE_ATTENDANCE, <span class="arduino-string">"w"</span>);
+
+    <span class="arduino-keyword">if</span> (!file) <span class="arduino-keyword">return</span>;
+
+    file.println(<span class="arduino-string">"date,time,id,name,status"</span>);
+
+    file.close();
+  }
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// CEK APAKAH SUDAH ABSEN HARI INI</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">bool</span> alreadyAttendanceToday(<span class="arduino-keyword">int</span> id) {
+
+  <span class="arduino-keyword">if</span> (!LittleFS.exists(FILE_ATTENDANCE)) {
+    <span class="arduino-keyword">return</span> <span class="arduino-keyword">false</span>;
+  }
+
+  <span class="arduino-keyword">String</span> today = getDate();
+
+  <span class="arduino-type">File</span> file =
+      LittleFS.open(FILE_ATTENDANCE, <span class="arduino-string">"r"</span>);
+
+  <span class="arduino-keyword">if</span> (!file) <span class="arduino-keyword">return</span> <span class="arduino-keyword">false</span>;
+
+  <span class="arduino-keyword">while</span> (file.available()) {
+
+    <span class="arduino-keyword">String</span> line = file.readStringUntil(<span class="arduino-string">'\n'</span>);
+
+    line.trim();
+
+    <span class="arduino-keyword">if</span> (line.length() == <span class="arduino-number">0</span>) {
+      <span class="arduino-keyword">continue</span>;
+    }
+
+    <span class="arduino-comment">// format:</span>
+    <span class="arduino-comment">// date,time,id,name,status</span>
+
+    <span class="arduino-keyword">int</span> p1 = line.indexOf(<span class="arduino-string">','</span>);
+
+    <span class="arduino-keyword">if</span> (p1 &lt; <span class="arduino-number">0</span>) <span class="arduino-keyword">continue</span>;
+
+    <span class="arduino-keyword">String</span> date =
+        line.substring(<span class="arduino-number">0</span>, p1);
+
+    <span class="arduino-keyword">int</span> p2 =
+        line.indexOf(<span class="arduino-string">','</span>, p1 + <span class="arduino-number">1</span>);
+
+    <span class="arduino-keyword">if</span> (p2 &lt; <span class="arduino-number">0</span>) <span class="arduino-keyword">continue</span>;
+
+    <span class="arduino-keyword">int</span> p3 =
+        line.indexOf(<span class="arduino-string">','</span>, p2 + <span class="arduino-number">1</span>);
+
+    <span class="arduino-keyword">if</span> (p3 &lt; <span class="arduino-number">0</span>) <span class="arduino-keyword">continue</span>;
+
+    <span class="arduino-keyword">String</span> idString =
+        line.substring(p2 + <span class="arduino-number">1</span>, p3);
+
+    <span class="arduino-keyword">if</span> (date == today &amp;&amp;
+        idString.toInt() == id) {
+
+      file.close();
+
+      <span class="arduino-keyword">return</span> <span class="arduino-keyword">true</span>;
+    }
+  }
+
+  file.close();
+
+  <span class="arduino-keyword">return</span> <span class="arduino-keyword">false</span>;
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// SIMPAN ABSENSI</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">void</span> saveAttendance(
+    <span class="arduino-keyword">int</span> id,
+    <span class="arduino-keyword">String</span> name,
+    <span class="arduino-keyword">String</span> status) {
+
+  <span class="arduino-type">File</span> file =
+      LittleFS.open(FILE_ATTENDANCE, <span class="arduino-string">"a"</span>);
+
+  <span class="arduino-keyword">if</span> (!file) {
+    <span class="arduino-keyword">return</span>;
+  }
+
+  file.print(getDate());
+  file.print(<span class="arduino-string">","</span>);
+
+  file.print(getTimeNow());
+  file.print(<span class="arduino-string">","</span>);
+
+  file.print(id);
+  file.print(<span class="arduino-string">","</span>);
+
+  <span class="arduino-comment">// koma dalam nama diubah menjadi spasi</span>
+  name.replace(<span class="arduino-string">","</span>, <span class="arduino-string">" "</span>);
+
+  file.print(name);
+  file.print(<span class="arduino-string">","</span>);
+
+  file.println(status);
+
+  file.close();
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// FINGERPRINT SEARCH</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">int</span> getFingerprintID() {
+
+  <span class="arduino-type">uint8_t</span> p =
+      finger.getImage();
+
+  <span class="arduino-keyword">if</span> (p != FINGERPRINT_OK) {
+    <span class="arduino-keyword">return</span> -<span class="arduino-number">1</span>;
+  }
+
+  p =
+      finger.image2Tz();
+
+  <span class="arduino-keyword">if</span> (p != FINGERPRINT_OK) {
+    <span class="arduino-keyword">return</span> -<span class="arduino-number">1</span>;
+  }
+
+  p =
+      finger.fingerFastSearch();
+
+  <span class="arduino-keyword">if</span> (p != FINGERPRINT_OK) {
+    <span class="arduino-keyword">return</span> -<span class="arduino-number">1</span>;
+  }
+
+  <span class="arduino-keyword">return</span> finger.fingerID;
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// ABSENSI</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">void</span> processFingerprint() {
+
+  <span class="arduino-keyword">int</span> id = getFingerprintID();
+
+  <span class="arduino-keyword">if</span> (id &lt; <span class="arduino-number">0</span>) {
+    <span class="arduino-keyword">return</span>;
+  }
+
+  <span class="arduino-keyword">int</span> index =
+      findStudentByID(id);
+
+  <span class="arduino-keyword">if</span> (index &lt; <span class="arduino-number">0</span>) {
+
+    lcdMessage(
+        <span class="arduino-string">"ID Tidak Terdaftar"</span>,
+        <span class="arduino-string">"ID: "</span> + <span class="arduino-keyword">String</span>(id));
+
+    failedSignal();
+
+    <span class="arduino-function">delay</span>(<span class="arduino-number">1000</span>);
+
+    lcdMessage(
+        <span class="arduino-string">"Tempelkan Jari"</span>,
+        <span class="arduino-string">"Silakan Absen"</span>);
+
+    <span class="arduino-keyword">return</span>;
+  }
+
+  <span class="arduino-keyword">String</span> name =
+      students[index].name;
+
+  lcdMessage(
+      <span class="arduino-string">"Halo!"</span>,
+      name);
+
+  <span class="arduino-keyword">if</span> (alreadyAttendanceToday(id)) {
+
+    lcdMessage(
+        <span class="arduino-string">"Sudah Absen"</span>,
+        name);
+
+    <span class="arduino-function">tone</span>(BUZZER_PIN, <span class="arduino-number">1000</span>, <span class="arduino-number">300</span>);
+
+    <span class="arduino-function">delay</span>(<span class="arduino-number">1500</span>);
+
+    lcdMessage(
+        <span class="arduino-string">"Tempelkan Jari"</span>,
+        <span class="arduino-string">"Silakan Absen"</span>);
+
+    <span class="arduino-keyword">return</span>;
+  }
+
+  <span class="arduino-keyword">String</span> status =
+      getAttendanceStatus();
+
+  saveAttendance(
+      id,
+      name,
+      status);
+
+  <span class="arduino-keyword">if</span> (status == <span class="arduino-string">"Hadir"</span>) {
+
+    lcdMessage(
+        <span class="arduino-string">"ABSEN BERHASIL"</span>,
+        <span class="arduino-string">"Hadir "</span> + getTimeNow());
+
+    successSignal();
+
+  } <span class="arduino-keyword">else</span> {
+
+    lcdMessage(
+        <span class="arduino-string">"ABSEN BERHASIL"</span>,
+        <span class="arduino-string">"Terlambat"</span>);
+
+    successSignal();
+  }
+
+  <span class="arduino-function">delay</span>(<span class="arduino-number">1500</span>);
+
+  lcdMessage(
+      <span class="arduino-string">"Tempelkan Jari"</span>,
+      <span class="arduino-string">"Silakan Absen"</span>);
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// ENROLL FINGERPRINT</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">bool</span> enrollFingerprint(<span class="arduino-keyword">int</span> id) {
+
+  lcdMessage(
+      <span class="arduino-string">"Daftar Finger"</span>,
+      <span class="arduino-string">"ID: "</span> + <span class="arduino-keyword">String</span>(id));
+
+  <span class="arduino-function">delay</span>(<span class="arduino-number">500</span>);
+
+  <span class="arduino-keyword">int</span> p = -<span class="arduino-number">1</span>;
+
+  <span class="arduino-comment">// -----------------------------</span>
+  <span class="arduino-comment">// Jari pertama</span>
+  <span class="arduino-comment">// -----------------------------</span>
+
+  lcdMessage(
+      <span class="arduino-string">"Tempelkan Jari"</span>,
+      <span class="arduino-string">"Pertama"</span>);
+
+  <span class="arduino-keyword">while</span> (p != FINGERPRINT_OK) {
+
+    p = finger.getImage();
+
+    <span class="arduino-keyword">if</span> (p == FINGERPRINT_OK) {
+      <span class="arduino-keyword">break</span>;
+    }
+
+    <span class="arduino-function">delay</span>(<span class="arduino-number">100</span>);
+  }
+
+  p = finger.image2Tz(<span class="arduino-number">1</span>);
+
+  <span class="arduino-keyword">if</span> (p != FINGERPRINT_OK) {
+
+    lcdMessage(
+        <span class="arduino-string">"Fingerprint"</span>,
+        <span class="arduino-string">"Gagal"</span>);
+
+    <span class="arduino-keyword">return</span> <span class="arduino-keyword">false</span>;
+  }
+
+  lcdMessage(
+      <span class="arduino-string">"Angkat Jari"</span>,
+      <span class="arduino-string">"Tunggu..."</span>);
+
+  <span class="arduino-function">delay</span>(<span class="arduino-number">1500</span>);
+
+  <span class="arduino-keyword">while</span> (finger.getImage() !=
+         FINGERPRINT_NOFINGER) {
+
+    <span class="arduino-function">delay</span>(<span class="arduino-number">100</span>);
+  }
+
+  <span class="arduino-comment">// -----------------------------</span>
+  <span class="arduino-comment">// Jari kedua</span>
+  <span class="arduino-comment">// -----------------------------</span>
+
+  lcdMessage(
+      <span class="arduino-string">"Tempelkan Lagi"</span>,
+      <span class="arduino-string">"Jari yang Sama"</span>);
+
+  p = -<span class="arduino-number">1</span>;
+
+  <span class="arduino-keyword">while</span> (p != FINGERPRINT_OK) {
+
+    p = finger.getImage();
+
+    <span class="arduino-keyword">if</span> (p == FINGERPRINT_OK) {
+      <span class="arduino-keyword">break</span>;
+    }
+
+    <span class="arduino-function">delay</span>(<span class="arduino-number">100</span>);
+  }
+
+  p = finger.image2Tz(<span class="arduino-number">2</span>);
+
+  <span class="arduino-keyword">if</span> (p != FINGERPRINT_OK) {
+
+    lcdMessage(
+        <span class="arduino-string">"Fingerprint"</span>,
+        <span class="arduino-string">"Gagal"</span>);
+
+    <span class="arduino-keyword">return</span> <span class="arduino-keyword">false</span>;
+  }
+
+  <span class="arduino-comment">// -----------------------------</span>
+  <span class="arduino-comment">// Buat model</span>
+  <span class="arduino-comment">// -----------------------------</span>
+
+  p =
+      finger.createModel();
+
+  <span class="arduino-keyword">if</span> (p != FINGERPRINT_OK) {
+
+    lcdMessage(
+        <span class="arduino-string">"Jari Tidak Cocok"</span>,
+        <span class="arduino-string">"Ulangi"</span>);
+
+    <span class="arduino-keyword">return</span> <span class="arduino-keyword">false</span>;
+  }
+
+  p =
+      finger.storeModel(id);
+
+  <span class="arduino-keyword">if</span> (p != FINGERPRINT_OK) {
+
+    lcdMessage(
+        <span class="arduino-string">"Gagal Simpan"</span>,
+        <span class="arduino-string">"Fingerprint"</span>);
+
+    <span class="arduino-keyword">return</span> <span class="arduino-keyword">false</span>;
+  }
+
+  lcdMessage(
+      <span class="arduino-string">"Berhasil!"</span>,
+      <span class="arduino-string">"ID "</span> + <span class="arduino-keyword">String</span>(id));
+
+  <span class="arduino-function">delay</span>(<span class="arduino-number">1500</span>);
+
+  <span class="arduino-keyword">return</span> <span class="arduino-keyword">true</span>;
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// WEB HTML</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">const</span> <span class="arduino-keyword">char</span> MAIN_HTML[] PROGMEM = R<span class="arduino-string">"rawliteral(
+
+&amp;lt;!DOCTYPE html&amp;gt;
+&amp;lt;html lang="</span>id<span class="arduino-string">"&amp;gt;
+
+&amp;lt;head&amp;gt;
+
+&amp;lt;meta charset="</span>UTF-<span class="arduino-number">8</span><span class="arduino-string">"&amp;gt;
+
+&amp;lt;meta name="</span>viewport<span class="arduino-string">"
+content="</span>width=device-width, initial-scale=<span class="arduino-number">1.0</span><span class="arduino-string">"&amp;gt;
+
+&amp;lt;title&amp;gt;Absensi Sekolah&amp;lt;/title&amp;gt;
+
+&amp;lt;style&amp;gt;
+
+*{
+box-sizing:border-box;
+}
+
+body{
+margin:0;
+font-family:Arial,Helvetica,sans-serif;
+background:#f1f5f9;
+color:#1e293b;
+}
+
+.sidebar{
+position:fixed;
+left:0;
+top:0;
+bottom:0;
+width:230px;
+background:#0f172a;
+color:white;
+padding:20px;
+}
+
+.logo{
+font-size:20px;
+font-weight:bold;
+margin-bottom:25px;
+}
+
+.menu{
+padding:12px;
+margin:5px 0;
+border-radius:8px;
+cursor:pointer;
+}
+
+.menu:hover,
+.menu.active{
+background:#2563eb;
+}
+
+.main{
+margin-left:230px;
+padding:25px;
+}
+
+.header{
+display:flex;
+justify-content:space-between;
+align-items:center;
+margin-bottom:20px;
+}
+
+.header h1{
+margin:0;
+}
+
+.cards{
+display:grid;
+grid-template-columns:
+repeat(4,1fr);
+gap:15px;
+margin-bottom:20px;
+}
+
+.card{
+background:white;
+border-radius:12px;
+padding:20px;
+box-shadow:
+0 2px 8px rgba(0,0,0,.06);
+}
+
+.card-title{
+color:#64748b;
+font-size:14px;
+}
+
+.card-value{
+font-size:30px;
+font-weight:bold;
+margin-top:10px;
+}
+
+.green{
+color:#16a34a;
+}
+
+.orange{
+color:#ea580c;
+}
+
+.red{
+color:#dc2626;
+}
+
+.blue{
+color:#2563eb;
+}
+
+.panel{
+background:white;
+border-radius:12px;
+padding:20px;
+margin-bottom:20px;
+box-shadow:
+0 2px 8px rgba(0,0,0,.06);
+}
+
+table{
+width:100%;
+border-collapse:collapse;
+}
+
+th,td{
+padding:12px;
+border-bottom:
+1px solid #e2e8f0;
+text-align:left;
+}
+
+th{
+background:#f8fafc;
+}
+
+.badge{
+padding:5px 9px;
+border-radius:20px;
+font-size:12px;
+font-weight:bold;
+}
+
+.badge-hadir{
+background:#dcfce7;
+color:#166534;
+}
+
+.badge-terlambat{
+background:#ffedd5;
+color:#9a3412;
+}
+
+.badge-tidak{
+background:#fee2e2;
+color:#991b1b;
+}
+
+button{
+border:0;
+padding:10px 15px;
+border-radius:7px;
+cursor:pointer;
+background:#2563eb;
+color:white;
+}
+
+button.danger{
+background:#dc2626;
+}
+
+button.green-btn{
+background:#16a34a;
+}
+
+input,select{
+padding:10px;
+border:1px solid #cbd5e1;
+border-radius:7px;
+width:100%;
+margin:5px 0 12px;
+}
+
+.form-grid{
+display:grid;
+grid-template-columns:
+repeat(2,1fr);
+gap:15px;
+}
+
+.section{
+display:none;
+}
+
+.section.active{
+display:block;
+}
+
+@media(max-width:800px){
+
+.sidebar{
+position:relative;
+width:100%;
+height:auto;
+}
+
+.main{
+margin-left:0;
+padding:15px;
+}
+
+.cards{
+grid-template-columns:
+repeat(2,1fr);
+}
+
+.form-grid{
+grid-template-columns:1fr;
+}
+
+}
+
+&amp;lt;/style&amp;gt;
+
+&amp;lt;/head&amp;gt;
+
+&amp;lt;body&amp;gt;
+
+&amp;lt;div class="</span>sidebar<span class="arduino-string">"&amp;gt;
+
+&amp;lt;div class="</span>logo<span class="arduino-string">"&amp;gt;
+🏫 ABSENSI SEKOLAH
+&amp;lt;/div&amp;gt;
+
+&amp;lt;div class="</span>menu active<span class="arduino-string">"
+onclick="</span>showSection(<span class="arduino-string">'dashboard'</span>,this)<span class="arduino-string">"&amp;gt;
+🏠 Dashboard
+&amp;lt;/div&amp;gt;
+
+&amp;lt;div class="</span>menu<span class="arduino-string">"
+onclick="</span>showSection(<span class="arduino-string">'students'</span>,this)<span class="arduino-string">"&amp;gt;
+👨‍🎓 Data Siswa
+&amp;lt;/div&amp;gt;
+
+&amp;lt;div class="</span>menu<span class="arduino-string">"
+onclick="</span>showSection(<span class="arduino-string">'studentReport'</span>,this)<span class="arduino-string">"&amp;gt;
+📊 Rekap Siswa
+&amp;lt;/div&amp;gt;
+
+&amp;lt;div class="</span>menu<span class="arduino-string">"
+onclick="</span>showSection(<span class="arduino-string">'monthly'</span>,this)<span class="arduino-string">"&amp;gt;
+📅 Rekap Bulanan
+&amp;lt;/div&amp;gt;
+
+&amp;lt;div class="</span>menu<span class="arduino-string">"
+onclick="</span>showSection(<span class="arduino-string">'settings'</span>,this)<span class="arduino-string">"&amp;gt;
+⚙️ Pengaturan
+&amp;lt;/div&amp;gt;
+
+&amp;lt;/div&amp;gt;
+
+&amp;lt;div class="</span>main<span class="arduino-string">"&amp;gt;
+
+&amp;lt;!-- DASHBOARD --&amp;gt;
+
+&amp;lt;div id="</span>dashboard<span class="arduino-string">"
+class="</span>section active<span class="arduino-string">"&amp;gt;
+
+&amp;lt;div class="</span>header<span class="arduino-string">"&amp;gt;
+
+&amp;lt;div&amp;gt;
+&amp;lt;h1&amp;gt;Dashboard&amp;lt;/h1&amp;gt;
+&amp;lt;p id="</span>today<span class="arduino-string">"&amp;gt;&amp;lt;/p&amp;gt;
+&amp;lt;/div&amp;gt;
+
+&amp;lt;/div&amp;gt;
+
+&amp;lt;div class="</span>cards<span class="arduino-string">"&amp;gt;
+
+&amp;lt;div class="</span>card<span class="arduino-string">"&amp;gt;
+&amp;lt;div class="</span>card-title<span class="arduino-string">"&amp;gt;
+Total Siswa
+&amp;lt;/div&amp;gt;
+&amp;lt;div class="</span>card-value blue<span class="arduino-string">"
+id="</span>totalStudents<span class="arduino-string">"&amp;gt;
+0
+&amp;lt;/div&amp;gt;
+&amp;lt;/div&amp;gt;
+
+&amp;lt;div class="</span>card<span class="arduino-string">"&amp;gt;
+&amp;lt;div class="</span>card-title<span class="arduino-string">"&amp;gt;
+Hadir
+&amp;lt;/div&amp;gt;
+&amp;lt;div class="</span>card-value green<span class="arduino-string">"
+id="</span>totalPresent<span class="arduino-string">"&amp;gt;
+0
+&amp;lt;/div&amp;gt;
+&amp;lt;/div&amp;gt;
+
+&amp;lt;div class="</span>card<span class="arduino-string">"&amp;gt;
+&amp;lt;div class="</span>card-title<span class="arduino-string">"&amp;gt;
+Terlambat
+&amp;lt;/div&amp;gt;
+&amp;lt;div class="</span>card-value orange<span class="arduino-string">"
+id="</span>totalLate<span class="arduino-string">"&amp;gt;
+0
+&amp;lt;/div&amp;gt;
+&amp;lt;/div&amp;gt;
+
+&amp;lt;div class="</span>card<span class="arduino-string">"&amp;gt;
+&amp;lt;div class="</span>card-title<span class="arduino-string">"&amp;gt;
+Tidak Hadir
+&amp;lt;/div&amp;gt;
+&amp;lt;div class="</span>card-value red<span class="arduino-string">"
+id="</span>totalAbsent<span class="arduino-string">"&amp;gt;
+0
+&amp;lt;/div&amp;gt;
+&amp;lt;/div&amp;gt;
+
+&amp;lt;/div&amp;gt;
+
+&amp;lt;div class="</span>panel<span class="arduino-string">"&amp;gt;
+
+&amp;lt;h2&amp;gt;Absensi Hari Ini&amp;lt;/h2&amp;gt;
+
+&amp;lt;table&amp;gt;
+
+&amp;lt;thead&amp;gt;
+
+&amp;lt;tr&amp;gt;
+&amp;lt;th&amp;gt;No&amp;lt;/th&amp;gt;
+&amp;lt;th&amp;gt;Nama&amp;lt;/th&amp;gt;
+&amp;lt;th&amp;gt;Jam&amp;lt;/th&amp;gt;
+&amp;lt;th&amp;gt;Status&amp;lt;/th&amp;gt;
+&amp;lt;/tr&amp;gt;
+
+&amp;lt;/thead&amp;gt;
+
+&amp;lt;tbody id="</span>todayTable<span class="arduino-string">"&amp;gt;
+&amp;lt;/tbody&amp;gt;
+
+&amp;lt;/table&amp;gt;
+
+&amp;lt;/div&amp;gt;
+
+&amp;lt;/div&amp;gt;
+
+&amp;lt;!-- DATA SISWA --&amp;gt;
+
+&amp;lt;div id="</span>students<span class="arduino-string">"
+class="</span>section<span class="arduino-string">"&amp;gt;
+
+&amp;lt;div class="</span>panel<span class="arduino-string">"&amp;gt;
+
+&amp;lt;h2&amp;gt;Tambah Siswa&amp;lt;/h2&amp;gt;
+
+&amp;lt;div class="</span>form-grid<span class="arduino-string">"&amp;gt;
+
+&amp;lt;div&amp;gt;
+
+&amp;lt;label&amp;gt;Nama Siswa&amp;lt;/label&amp;gt;
+
+&amp;lt;input
+id="</span>studentName<span class="arduino-string">"
+placeholder="</span>Nama lengkap<span class="arduino-string">"&amp;gt;
+
+&amp;lt;/div&amp;gt;
+
+&amp;lt;div&amp;gt;
+
+&amp;lt;label&amp;gt;ID Fingerprint&amp;lt;/label&amp;gt;
+
+&amp;lt;input
+id="</span>studentID<span class="arduino-string">"
+type="</span>number<span class="arduino-string">"
+placeholder="</span>Contoh: <span class="arduino-number">1</span><span class="arduino-string">"&amp;gt;
+
+&amp;lt;/div&amp;gt;
+
+&amp;lt;/div&amp;gt;
+
+&amp;lt;button
+class="</span>green-btn<span class="arduino-string">"
+onclick="</span>addStudent()<span class="arduino-string">"&amp;gt;
+
+Tambah &amp;amp; Daftar Fingerprint
+
+&amp;lt;/button&amp;gt;
+
+&amp;lt;/div&amp;gt;
+
+&amp;lt;div class="</span>panel<span class="arduino-string">"&amp;gt;
+
+&amp;lt;h2&amp;gt;Data Siswa&amp;lt;/h2&amp;gt;
+
+&amp;lt;table&amp;gt;
+
+&amp;lt;thead&amp;gt;
+
+&amp;lt;tr&amp;gt;
+&amp;lt;th&amp;gt;ID&amp;lt;/th&amp;gt;
+&amp;lt;th&amp;gt;Nama&amp;lt;/th&amp;gt;
+&amp;lt;th&amp;gt;Aksi&amp;lt;/th&amp;gt;
+&amp;lt;/tr&amp;gt;
+
+&amp;lt;/thead&amp;gt;
+
+&amp;lt;tbody id="</span>studentTable<span class="arduino-string">"&amp;gt;
+&amp;lt;/tbody&amp;gt;
+
+&amp;lt;/table&amp;gt;
+
+&amp;lt;/div&amp;gt;
+
+&amp;lt;/div&amp;gt;
+
+&amp;lt;!-- REKAP SISWA --&amp;gt;
+
+&amp;lt;div id="</span>studentReport<span class="arduino-string">"
+class="</span>section<span class="arduino-string">"&amp;gt;
+
+&amp;lt;div class="</span>panel<span class="arduino-string">"&amp;gt;
+
+&amp;lt;h2&amp;gt;Rekap Per Siswa&amp;lt;/h2&amp;gt;
+
+&amp;lt;label&amp;gt;Pilih Siswa&amp;lt;/label&amp;gt;
+
+&amp;lt;select id="</span>reportStudent<span class="arduino-string">"
+onchange="</span>loadStudentReport()<span class="arduino-string">"&amp;gt;
+&amp;lt;/select&amp;gt;
+
+&amp;lt;div id="</span>studentSummary<span class="arduino-string">"&amp;gt;
+&amp;lt;/div&amp;gt;
+
+&amp;lt;/div&amp;gt;
+
+&amp;lt;div class="</span>panel<span class="arduino-string">"&amp;gt;
+
+&amp;lt;h2&amp;gt;Riwayat Absensi&amp;lt;/h2&amp;gt;
+
+&amp;lt;table&amp;gt;
+
+&amp;lt;thead&amp;gt;
+
+&amp;lt;tr&amp;gt;
+&amp;lt;th&amp;gt;Tanggal&amp;lt;/th&amp;gt;
+&amp;lt;th&amp;gt;Jam&amp;lt;/th&amp;gt;
+&amp;lt;th&amp;gt;Status&amp;lt;/th&amp;gt;
+&amp;lt;/tr&amp;gt;
+
+&amp;lt;/thead&amp;gt;
+
+&amp;lt;tbody id="</span>studentReportTable<span class="arduino-string">"&amp;gt;
+&amp;lt;/tbody&amp;gt;
+
+&amp;lt;/table&amp;gt;
+
+&amp;lt;/div&amp;gt;
+
+&amp;lt;/div&amp;gt;
+
+&amp;lt;!-- BULANAN --&amp;gt;
+
+&amp;lt;div id="</span>monthly<span class="arduino-string">"
+class="</span>section<span class="arduino-string">"&amp;gt;
+
+&amp;lt;div class="</span>panel<span class="arduino-string">"&amp;gt;
+
+&amp;lt;h2&amp;gt;Rekap Bulanan&amp;lt;/h2&amp;gt;
+
+&amp;lt;label&amp;gt;Bulan&amp;lt;/label&amp;gt;
+
+&amp;lt;input
+type="</span>month<span class="arduino-string">"
+id="</span>monthSelect<span class="arduino-string">"&amp;gt;
+
+&amp;lt;button
+onclick="</span>loadMonthly()<span class="arduino-string">"&amp;gt;
+
+Tampilkan Rekap
+
+&amp;lt;/button&amp;gt;
+
+&amp;lt;/div&amp;gt;
+
+&amp;lt;div class="</span>panel<span class="arduino-string">"&amp;gt;
+
+&amp;lt;table&amp;gt;
+
+&amp;lt;thead&amp;gt;
+
+&amp;lt;tr&amp;gt;
+&amp;lt;th&amp;gt;No&amp;lt;/th&amp;gt;
+&amp;lt;th&amp;gt;Nama&amp;lt;/th&amp;gt;
+&amp;lt;th&amp;gt;Hadir&amp;lt;/th&amp;gt;
+&amp;lt;th&amp;gt;Terlambat&amp;lt;/th&amp;gt;
+&amp;lt;th&amp;gt;Tidak Hadir&amp;lt;/th&amp;gt;
+&amp;lt;th&amp;gt;Kehadiran&amp;lt;/th&amp;gt;
+&amp;lt;/tr&amp;gt;
+
+&amp;lt;/thead&amp;gt;
+
+&amp;lt;tbody id="</span>monthlyTable<span class="arduino-string">"&amp;gt;
+&amp;lt;/tbody&amp;gt;
+
+&amp;lt;/table&amp;gt;
+
+&amp;lt;/div&amp;gt;
+
+&amp;lt;/div&amp;gt;
+
+&amp;lt;!-- SETTINGS --&amp;gt;
+
+&amp;lt;div id="</span>settings<span class="arduino-string">"
+class="</span>section<span class="arduino-string">"&amp;gt;
+
+&amp;lt;div class="</span>panel<span class="arduino-string">"&amp;gt;
+
+&amp;lt;h2&amp;gt;Pengaturan Absensi&amp;lt;/h2&amp;gt;
+
+&amp;lt;label&amp;gt;
+Batas Jam Masuk
+&amp;lt;/label&amp;gt;
+
+&amp;lt;input
+type="</span>time<span class="arduino-string">"
+id="</span>entryTime<span class="arduino-string">"&amp;gt;
+
+&amp;lt;button
+onclick="</span>saveSettings()<span class="arduino-string">"&amp;gt;
+
+Simpan Pengaturan
+
+&amp;lt;/button&amp;gt;
+
+&amp;lt;hr&amp;gt;
+
+&amp;lt;p&amp;gt;
+Zona waktu:
+&amp;lt;strong&amp;gt;WIB (UTC+7)&amp;lt;/strong&amp;gt;
+&amp;lt;/p&amp;gt;
+
+&amp;lt;p&amp;gt;
+NTP:
+&amp;lt;strong id="</span>ntpStatus<span class="arduino-string">"&amp;gt;
+-
+&amp;lt;/strong&amp;gt;
+&amp;lt;/p&amp;gt;
+
+&amp;lt;/div&amp;gt;
+
+&amp;lt;/div&amp;gt;
+
+&amp;lt;/div&amp;gt;
+
+&amp;lt;script&amp;gt;
+
+function showSection(id,el){
+
+document
+.querySelectorAll('.section')
+.forEach(x =&amp;gt;
+x.classList.remove('active'));
+
+document
+.getElementById(id)
+.classList.add('active');
+
+document
+.querySelectorAll('.menu')
+.forEach(x =&amp;gt;
+x.classList.remove('active'));
+
+el.classList.add('active');
+
+if(id==='students'){
+loadStudents();
+}
+
+if(id==='studentReport'){
+loadStudentSelect();
+}
+
+if(id==='monthly'){
+setDefaultMonth();
+}
+
+if(id==='settings'){
+loadSettings();
+}
+
+}
+
+async function api(url){
+
+const response =
+await fetch(url);
+
+return await response.json();
+
+}
+
+<span class="arduino-comment">// =================================================</span>
+<span class="arduino-comment">// DASHBOARD</span>
+<span class="arduino-comment">// =================================================</span>
+
+async function loadDashboard(){
+
+const data =
+await api('/api/dashboard');
+
+document
+.getElementById('today')
+innerHTML =
+data.date + "</span> <span class="arduino-string">" + data.time;
+
+document
+.getElementById('totalStudents')
+innerHTML =
+data.total;
+
+document
+.getElementById('totalPresent')
+innerHTML =
+data.present;
+
+document
+.getElementById('totalLate')
+.innerHTML =
+data.late;
+
+document
+.getElementById('totalAbsent')
+.innerHTML =
+data.absent;
+
+let html="</span><span class="arduino-string">";
+
+data.records.forEach(
+(r,i)=&amp;gt;{
+
+let badge =
+r.status==="</span>Hadir<span class="arduino-string">"
+?
+"</span>badge-hadir<span class="arduino-string">"
+:
+"</span>badge-terlambat<span class="arduino-string">";
+
+html += `
+&amp;lt;tr&amp;gt;
+
+&amp;lt;td&amp;gt;${i+1}&amp;lt;/td&amp;gt;
+
+&amp;lt;td&amp;gt;${r.name}&amp;lt;/td&amp;gt;
+
+&amp;lt;td&amp;gt;${r.time}&amp;lt;/td&amp;gt;
+
+&amp;lt;td&amp;gt;
+&amp;lt;span class="</span>badge ${badge}<span class="arduino-string">"&amp;gt;
+${r.status}
+&amp;lt;/span&amp;gt;
+&amp;lt;/td&amp;gt;
+
+&amp;lt;/tr&amp;gt;
+`;
+
+});
+
+document
+.getElementById('todayTable')
+.innerHTML=html;
+
+}
+
+<span class="arduino-comment">// =================================================</span>
+<span class="arduino-comment">// SISWA</span>
+<span class="arduino-comment">// =================================================</span>
+
+async function loadStudents(){
+
+const data =
+await api('/api/students');
+
+let html="</span><span class="arduino-string">";
+
+data.forEach(s=&amp;gt;{
+
+html += `
+&amp;lt;tr&amp;gt;
+
+&amp;lt;td&amp;gt;${s.id}&amp;lt;/td&amp;gt;
+
+&amp;lt;td&amp;gt;${s.name}&amp;lt;/td&amp;gt;
+
+&amp;lt;td&amp;gt;
+
+&amp;lt;button
+class="</span>danger<span class="arduino-string">"
+onclick="</span>deleteStudent(${s.id})<span class="arduino-string">"&amp;gt;
+
+Hapus
+
+&amp;lt;/button&amp;gt;
+
+&amp;lt;/td&amp;gt;
+
+&amp;lt;/tr&amp;gt;
+`;
+
+});
+
+document
+.getElementById('studentTable')
+.innerHTML=html;
+
+}
+
+async function addStudent(){
+
+const name =
+document
+.getElementById('studentName')
+.value;
+
+const id =
+document
+.getElementById('studentID')
+.value;
+
+if(!name || !id){
+
+alert("</span>Nama dan ID harus diisi<span class="arduino-string">");
+
+return;
+
+}
+
+if(!confirm(
+"</span>Daftarkan fingerprint ID <span class="arduino-string">"+id+
+"</span> untuk <span class="arduino-string">"+name+"</span>?<span class="arduino-string">"
+)) return;
+
+const response =
+await fetch(
+'/api/addStudent',
+{
+method:'POST',
+headers:{
+'Content-Type':
+'application/x-www-form-urlencoded'
+},
+body:
+'name='+encodeURIComponent(name)+
+'&amp;amp;id='+encodeURIComponent(id)
+});
+
+const text =
+await response.text();
+
+alert(text);
+
+document
+.getElementById('studentName')
+.value="</span><span class="arduino-string">";
+
+document
+.getElementById('studentID')
+.value="</span><span class="arduino-string">";
+
+loadStudents();
+
+}
+
+async function deleteStudent(id){
+
+if(!confirm(
+"</span>Yakin ingin menghapus siswa ID <span class="arduino-string">"+id+"</span>?<span class="arduino-string">"
+)) return;
+
+const response =
+await fetch(
+'/api/deleteStudent?id='+id);
+
+const text =
+await response.text();
+
+alert(text);
+
+loadStudents();
+
+}
+
+<span class="arduino-comment">// =================================================</span>
+<span class="arduino-comment">// REKAP SISWA</span>
+<span class="arduino-comment">// =================================================</span>
+
+async function loadStudentSelect(){
+
+const data =
+await api('/api/students');
+
+let html =
+'&amp;lt;option value="</span><span class="arduino-string">"&amp;gt;-- Pilih Siswa --&amp;lt;/option&amp;gt;';
+
+data.forEach(s=&amp;gt;{
+
+html +=
+`&amp;lt;option value="</span>${s.id}<span class="arduino-string">"&amp;gt;
+${s.name}
+&amp;lt;/option&amp;gt;`;
+
+});
+
+document
+.getElementById('reportStudent')
+.innerHTML=html;
+
+}
+
+async function loadStudentReport(){
+
+const id =
+document
+.getElementById('reportStudent')
+.value;
+
+if(!id){
+
+return;
+
+}
+
+const data =
+await api(
+'/api/studentReport?id='+id);
+
+document
+.getElementById('studentSummary')
+.innerHTML=`
+
+&amp;lt;p&amp;gt;
+&amp;lt;strong&amp;gt;${data.name}&amp;lt;/strong&amp;gt;
+&amp;lt;/p&amp;gt;
+
+&amp;lt;div class="</span>cards<span class="arduino-string">"&amp;gt;
+
+&amp;lt;div class="</span>card<span class="arduino-string">"&amp;gt;
+Hadir
+&amp;lt;h2 class="</span>green<span class="arduino-string">"&amp;gt;
+${data.present}
+&amp;lt;/h2&amp;gt;
+&amp;lt;/div&amp;gt;
+
+&amp;lt;div class="</span>card<span class="arduino-string">"&amp;gt;
+Terlambat
+&amp;lt;h2 class="</span>orange<span class="arduino-string">"&amp;gt;
+${data.late}
+&amp;lt;/h2&amp;gt;
+&amp;lt;/div&amp;gt;
+
+&amp;lt;div class="</span>card<span class="arduino-string">"&amp;gt;
+Tidak Hadir
+&amp;lt;h2 class="</span>red<span class="arduino-string">"&amp;gt;
+${data.absent}
+&amp;lt;/h2&amp;gt;
+&amp;lt;/div&amp;gt;
+
+&amp;lt;div class="</span>card<span class="arduino-string">"&amp;gt;
+Kehadiran
+&amp;lt;h2 class="</span>blue<span class="arduino-string">"&amp;gt;
+${data.percentage}%
+&amp;lt;/h2&amp;gt;
+&amp;lt;/div&amp;gt;
+
+&amp;lt;/div&amp;gt;
+`;
+
+let html="</span><span class="arduino-string">";
+
+data.records.forEach(r=&amp;gt;{
+
+let badge =
+r.status==="</span>Hadir<span class="arduino-string">"
+?
+"</span>badge-hadir<span class="arduino-string">"
+:
+"</span>badge-terlambat<span class="arduino-string">";
+
+html += `
+&amp;lt;tr&amp;gt;
+
+&amp;lt;td&amp;gt;${r.date}&amp;lt;/td&amp;gt;
+
+&amp;lt;td&amp;gt;${r.time}&amp;lt;/td&amp;gt;
+
+&amp;lt;td&amp;gt;
+&amp;lt;span class="</span>badge ${badge}<span class="arduino-string">"&amp;gt;
+${r.status}
+&amp;lt;/span&amp;gt;
+&amp;lt;/td&amp;gt;
+
+&amp;lt;/tr&amp;gt;
+`;
+
+});
+
+document
+.getElementById('studentReportTable')
+.innerHTML=html;
+
+}
+
+<span class="arduino-comment">// =================================================</span>
+<span class="arduino-comment">// BULANAN</span>
+<span class="arduino-comment">// =================================================</span>
+
+function setDefaultMonth(){
+
+const now =
+new Date();
+
+const year =
+now.getFullYear();
+
+const month =
+String(now.getMonth()+1)
+.padStart(2,'0');
+
+document
+.getElementById('monthSelect')
+.value =
+year+"</span>-<span class="arduino-string">"+month;
+
+}
+
+async function loadMonthly(){
+
+const month =
+document
+.getElementById('monthSelect')
+.value;
+
+if(!month){
+
+alert("</span>Pilih bulan<span class="arduino-string">");
+
+return;
+
+}
+
+const data =
+await api(
+'/api/monthly?month='+month);
+
+let html="</span><span class="arduino-string">";
+
+data.forEach((r,i)=&amp;gt;{
+
+html += `
+&amp;lt;tr&amp;gt;
+
+&amp;lt;td&amp;gt;${i+1}&amp;lt;/td&amp;gt;
+
+&amp;lt;td&amp;gt;${r.name}&amp;lt;/td&amp;gt;
+
+&amp;lt;td class="</span>green<span class="arduino-string">"&amp;gt;
+${r.present}
+&amp;lt;/td&amp;gt;
+
+&amp;lt;td class="</span>orange<span class="arduino-string">"&amp;gt;
+${r.late}
+&amp;lt;/td&amp;gt;
+
+&amp;lt;td class="</span>red<span class="arduino-string">"&amp;gt;
+${r.absent}
+&amp;lt;/td&amp;gt;
+
+&amp;lt;td&amp;gt;
+${r.percentage}%
+&amp;lt;/td&amp;gt;
+
+&amp;lt;/tr&amp;gt;
+`;
+
+});
+
+document
+.getElementById('monthlyTable')
+.innerHTML=html;
+
+}
+
+<span class="arduino-comment">// =================================================</span>
+<span class="arduino-comment">// SETTINGS</span>
+<span class="arduino-comment">// =================================================</span>
+
+async function loadSettings(){
+
+const data =
+await api('/api/settings');
+
+document
+.getElementById('entryTime')
+.value =
+data.time;
+
+document
+.getElementById('ntpStatus')
+.innerHTML =
+data.ntp;
+
+}
+
+async function saveSettings(){
+
+const time =
+document
+.getElementById('entryTime')
+.value;
+
+if(!time){
+
+alert("</span>Jam belum dipilih<span class="arduino-string">");
+
+return;
+
+}
+
+const response =
+await fetch(
+'/api/settings',
+{
+method:'POST',
+headers:{
+'Content-Type':
+'application/x-www-form-urlencoded'
+},
+body:
+'time='+encodeURIComponent(time)
+});
+
+alert(
+await response.text()
+);
+
+loadSettings();
+
+}
+
+<span class="arduino-comment">// =================================================</span>
+<span class="arduino-comment">// AUTO REFRESH</span>
+<span class="arduino-comment">// =================================================</span>
+
+loadDashboard();
+
+setInterval(
+loadDashboard,
+5000
+);
+
+&amp;lt;/script&amp;gt;
+
+&amp;lt;/body&amp;gt;
+
+&amp;lt;/html&amp;gt;
+
+)rawliteral"</span>;
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// WEB: ROOT</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">void</span> handleRoot() {
+
+  server.send(
+      <span class="arduino-number">200</span>,
+      <span class="arduino-string">"text/html"</span>,
+      MAIN_HTML);
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// API STUDENTS</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">void</span> handleStudents() {
+
+  <span class="arduino-keyword">String</span> json = <span class="arduino-string">"["</span>;
+
+  <span class="arduino-keyword">for</span> (<span class="arduino-keyword">int</span> i = <span class="arduino-number">0</span>;
+       i &lt; studentCount;
+       i++) {
+
+    <span class="arduino-keyword">if</span> (i &gt; <span class="arduino-number">0</span>) {
+      json += <span class="arduino-string">","</span>;
+    }
+
+    json += <span class="arduino-string">"{"</span>;
+    json += <span class="arduino-string">"\"id\":"</span> +
+            <span class="arduino-keyword">String</span>(students[i].id);
+
+    json += <span class="arduino-string">",\"name\":\""</span> +
+            jsonEscape(
+              students[i].name) +
+            <span class="arduino-string">"\""</span>;
+
+    json += <span class="arduino-string">"}"</span>;
+  }
+
+  json += <span class="arduino-string">"]"</span>;
+
+  server.send(
+      <span class="arduino-number">200</span>,
+      <span class="arduino-string">"application/json"</span>,
+      json);
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// API ADD STUDENT</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">void</span> handleAddStudent() {
+
+  <span class="arduino-keyword">if</span> (!server.hasArg(<span class="arduino-string">"name"</span>) ||
+      !server.hasArg(<span class="arduino-string">"id"</span>)) {
+
+    server.send(
+        <span class="arduino-number">400</span>,
+        <span class="arduino-string">"text/plain"</span>,
+        <span class="arduino-string">"Data tidak lengkap"</span>);
+
+    <span class="arduino-keyword">return</span>;
+  }
+
+  <span class="arduino-keyword">String</span> name =
+      server.arg(<span class="arduino-string">"name"</span>);
+
+  <span class="arduino-keyword">int</span> id =
+      server.arg(<span class="arduino-string">"id"</span>).toInt();
+
+  <span class="arduino-keyword">if</span> (id &lt;= <span class="arduino-number">0</span> || id &gt; <span class="arduino-number">127</span>) {
+
+    server.send(
+        <span class="arduino-number">400</span>,
+        <span class="arduino-string">"text/plain"</span>,
+        <span class="arduino-string">"ID fingerprint harus 1-127"</span>);
+
+    <span class="arduino-keyword">return</span>;
+  }
+
+  <span class="arduino-keyword">if</span> (findStudentByID(id) &gt;= <span class="arduino-number">0</span>) {
+
+    server.send(
+        <span class="arduino-number">400</span>,
+        <span class="arduino-string">"text/plain"</span>,
+        <span class="arduino-string">"ID fingerprint sudah digunakan"</span>);
+
+    <span class="arduino-keyword">return</span>;
+  }
+
+  <span class="arduino-keyword">if</span> (studentCount &gt;= MAX_STUDENTS) {
+
+    server.send(
+        <span class="arduino-number">400</span>,
+        <span class="arduino-string">"text/plain"</span>,
+        <span class="arduino-string">"Kapasitas siswa penuh"</span>);
+
+    <span class="arduino-keyword">return</span>;
+  }
+
+  enrollmentRunning = <span class="arduino-keyword">true</span>;
+
+  enrollmentID = id;
+
+  enrollmentName = name;
+
+  <span class="arduino-keyword">bool</span> success =
+      enrollFingerprint(id);
+
+  enrollmentRunning = <span class="arduino-keyword">false</span>;
+
+  <span class="arduino-keyword">if</span> (!success) {
+
+    server.send(
+        <span class="arduino-number">500</span>,
+        <span class="arduino-string">"text/plain"</span>,
+        <span class="arduino-string">"Pendaftaran fingerprint gagal"</span>);
+
+    <span class="arduino-keyword">return</span>;
+  }
+
+  students[studentCount].id =
+      id;
+
+  students[studentCount].name =
+      name;
+
+  studentCount++;
+
+  saveStudents();
+
+  server.send(
+      <span class="arduino-number">200</span>,
+      <span class="arduino-string">"text/plain"</span>,
+      <span class="arduino-string">"Siswa berhasil ditambahkan dan fingerprint berhasil didaftarkan"</span>);
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// DELETE STUDENT</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">void</span> handleDeleteStudent() {
+
+  <span class="arduino-keyword">if</span> (!server.hasArg(<span class="arduino-string">"id"</span>)) {
+
+    server.send(
+        <span class="arduino-number">400</span>,
+        <span class="arduino-string">"text/plain"</span>,
+        <span class="arduino-string">"ID tidak ditemukan"</span>);
+
+    <span class="arduino-keyword">return</span>;
+  }
+
+  <span class="arduino-keyword">int</span> id =
+      server.arg(<span class="arduino-string">"id"</span>).toInt();
+
+  <span class="arduino-keyword">int</span> index =
+      findStudentByID(id);
+
+  <span class="arduino-keyword">if</span> (index &lt; <span class="arduino-number">0</span>) {
+
+    server.send(
+        <span class="arduino-number">404</span>,
+        <span class="arduino-string">"text/plain"</span>,
+        <span class="arduino-string">"Siswa tidak ditemukan"</span>);
+
+    <span class="arduino-keyword">return</span>;
+  }
+
+  <span class="arduino-type">uint8_t</span> result =
+      finger.deleteModel(id);
+
+  <span class="arduino-keyword">if</span> (result != FINGERPRINT_OK) {
+
+    server.send(
+        <span class="arduino-number">500</span>,
+        <span class="arduino-string">"text/plain"</span>,
+        <span class="arduino-string">"Gagal menghapus fingerprint"</span>);
+
+    <span class="arduino-keyword">return</span>;
+  }
+
+  <span class="arduino-keyword">for</span> (<span class="arduino-keyword">int</span> i = index;
+       i &lt; studentCount - <span class="arduino-number">1</span>;
+       i++) {
+
+    students[i] =
+        students[i + <span class="arduino-number">1</span>];
+  }
+
+  studentCount--;
+
+  saveStudents();
+
+  server.send(
+      <span class="arduino-number">200</span>,
+      <span class="arduino-string">"text/plain"</span>,
+      <span class="arduino-string">"Siswa dan fingerprint berhasil dihapus"</span>);
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// BACA ABSENSI HARI INI</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">struct</span> AttendanceRecord {
+
+  <span class="arduino-keyword">String</span> date;
+  <span class="arduino-keyword">String</span> time;
+  <span class="arduino-keyword">int</span> id;
+  <span class="arduino-keyword">String</span> name;
+  <span class="arduino-keyword">String</span> status;
+};
+
+<span class="arduino-keyword">const</span> <span class="arduino-keyword">int</span> MAX_RECORDS = <span class="arduino-number">500</span>;
+
+AttendanceRecord records[MAX_RECORDS];
+
+<span class="arduino-keyword">int</span> readAttendanceForDate(
+    <span class="arduino-keyword">String</span> targetDate) {
+
+  <span class="arduino-keyword">int</span> count = <span class="arduino-number">0</span>;
+
+  <span class="arduino-keyword">if</span> (!LittleFS.exists(
+          FILE_ATTENDANCE)) {
+
+    <span class="arduino-keyword">return</span> <span class="arduino-number">0</span>;
+  }
+
+  <span class="arduino-type">File</span> file =
+      LittleFS.open(
+          FILE_ATTENDANCE,
+          <span class="arduino-string">"r"</span>);
+
+  <span class="arduino-keyword">if</span> (!file) {
+    <span class="arduino-keyword">return</span> <span class="arduino-number">0</span>;
+  }
+
+  <span class="arduino-keyword">while</span> (file.available() &amp;&amp;
+         count &lt; MAX_RECORDS) {
+
+    <span class="arduino-keyword">String</span> line =
+        file.readStringUntil(<span class="arduino-string">'\n'</span>);
+
+    line.trim();
+
+    <span class="arduino-keyword">if</span> (line.length() == <span class="arduino-number">0</span> ||
+        line.startsWith(<span class="arduino-string">"date,"</span>)) {
+
+      <span class="arduino-keyword">continue</span>;
+    }
+
+    <span class="arduino-keyword">int</span> p1 =
+        line.indexOf(<span class="arduino-string">','</span>);
+
+    <span class="arduino-keyword">int</span> p2 =
+        line.indexOf(<span class="arduino-string">','</span>, p1 + <span class="arduino-number">1</span>);
+
+    <span class="arduino-keyword">int</span> p3 =
+        line.indexOf(<span class="arduino-string">','</span>, p2 + <span class="arduino-number">1</span>);
+
+    <span class="arduino-keyword">int</span> p4 =
+        line.lastIndexOf(<span class="arduino-string">','</span>);
+
+    <span class="arduino-keyword">if</span> (p1 &lt; <span class="arduino-number">0</span> ||
+        p2 &lt; <span class="arduino-number">0</span> ||
+        p3 &lt; <span class="arduino-number">0</span> ||
+        p4 &lt; <span class="arduino-number">0</span>) {
+
+      <span class="arduino-keyword">continue</span>;
+    }
+
+    <span class="arduino-keyword">String</span> date =
+        line.substring(<span class="arduino-number">0</span>, p1);
+
+    <span class="arduino-keyword">if</span> (date != targetDate) {
+      <span class="arduino-keyword">continue</span>;
+    }
+
+    records[count].date =
+        date;
+
+    records[count].time =
+        line.substring(
+            p1 + <span class="arduino-number">1</span>,
+            p2);
+
+    records[count].id =
+        line.substring(
+            p2 + <span class="arduino-number">1</span>,
+            p3).toInt();
+
+    records[count].name =
+        line.substring(
+            p3 + <span class="arduino-number">1</span>,
+            p4);
+
+    records[count].status =
+        line.substring(
+            p4 + <span class="arduino-number">1</span>);
+
+    count++;
+  }
+
+  file.close();
+
+  <span class="arduino-keyword">return</span> count;
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// API DASHBOARD</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">void</span> handleDashboard() {
+
+  <span class="arduino-keyword">String</span> today =
+      getDate();
+
+  <span class="arduino-keyword">String</span> now =
+      getTimeNow();
+
+  <span class="arduino-keyword">int</span> count =
+      readAttendanceForDate(today);
+
+  <span class="arduino-keyword">int</span> present = <span class="arduino-number">0</span>;
+  <span class="arduino-keyword">int</span> late = <span class="arduino-number">0</span>;
+
+  <span class="arduino-keyword">for</span> (<span class="arduino-keyword">int</span> i = <span class="arduino-number">0</span>;
+       i &lt; count;
+       i++) {
+
+    <span class="arduino-keyword">if</span> (records[i].status ==
+        <span class="arduino-string">"Hadir"</span>) {
+
+      present++;
+
+    } <span class="arduino-keyword">else</span> <span class="arduino-keyword">if</span> (
+        records[i].status ==
+        <span class="arduino-string">"Terlambat"</span>) {
+
+      late++;
+    }
+  }
+
+  <span class="arduino-keyword">int</span> absent =
+      studentCount -
+      present -
+      late;
+
+  <span class="arduino-keyword">if</span> (absent &lt; <span class="arduino-number">0</span>) {
+    absent = <span class="arduino-number">0</span>;
+  }
+
+  <span class="arduino-keyword">String</span> json = <span class="arduino-string">"{"</span>;
+
+  json +=
+      <span class="arduino-string">"\"date\":\""</span> +
+      today + <span class="arduino-string">"\","</span>;
+
+  json +=
+      <span class="arduino-string">"\"time\":\""</span> +
+      now + <span class="arduino-string">"\","</span>;
+
+  json +=
+      <span class="arduino-string">"\"total\":"</span> +
+      <span class="arduino-keyword">String</span>(studentCount) +
+      <span class="arduino-string">","</span>;
+
+  json +=
+      <span class="arduino-string">"\"present\":"</span> +
+      <span class="arduino-keyword">String</span>(present) +
+      <span class="arduino-string">","</span>;
+
+  json +=
+      <span class="arduino-string">"\"late\":"</span> +
+      <span class="arduino-keyword">String</span>(late) +
+      <span class="arduino-string">","</span>;
+
+  json +=
+      <span class="arduino-string">"\"absent\":"</span> +
+      <span class="arduino-keyword">String</span>(absent) +
+      <span class="arduino-string">","</span>;
+
+  json += <span class="arduino-string">"\"records\":["</span>;
+
+  <span class="arduino-keyword">for</span> (<span class="arduino-keyword">int</span> i = <span class="arduino-number">0</span>;
+       i &lt; count;
+       i++) {
+
+    <span class="arduino-keyword">if</span> (i &gt; <span class="arduino-number">0</span>) {
+      json += <span class="arduino-string">","</span>;
+    }
+
+    json += <span class="arduino-string">"{"</span>;
+
+    json +=
+        <span class="arduino-string">"\"name\":\""</span> +
+        jsonEscape(
+          records[i].name) +
+        <span class="arduino-string">"\","</span>;
+
+    json +=
+        <span class="arduino-string">"\"time\":\""</span> +
+        records[i].time +
+        <span class="arduino-string">"\","</span>;
+
+    json +=
+        <span class="arduino-string">"\"status\":\""</span> +
+        records[i].status +
+        <span class="arduino-string">"\""</span>;
+
+    json += <span class="arduino-string">"}"</span>;
+  }
+
+  json += <span class="arduino-string">"]}"</span>;
+
+  server.send(
+      <span class="arduino-number">200</span>,
+      <span class="arduino-string">"application/json"</span>,
+      json);
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// API REKAP SISWA</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">void</span> handleStudentReport() {
+
+  <span class="arduino-keyword">if</span> (!server.hasArg(<span class="arduino-string">"id"</span>)) {
+
+    server.send(
+        <span class="arduino-number">400</span>,
+        <span class="arduino-string">"text/plain"</span>,
+        <span class="arduino-string">"ID tidak ada"</span>);
+
+    <span class="arduino-keyword">return</span>;
+  }
+
+  <span class="arduino-keyword">int</span> id =
+      server.arg(<span class="arduino-string">"id"</span>).toInt();
+
+  <span class="arduino-keyword">int</span> index =
+      findStudentByID(id);
+
+  <span class="arduino-keyword">if</span> (index &lt; <span class="arduino-number">0</span>) {
+
+    server.send(
+        <span class="arduino-number">404</span>,
+        <span class="arduino-string">"text/plain"</span>,
+        <span class="arduino-string">"Siswa tidak ditemukan"</span>);
+
+    <span class="arduino-keyword">return</span>;
+  }
+
+  <span class="arduino-keyword">int</span> present = <span class="arduino-number">0</span>;
+  <span class="arduino-keyword">int</span> late = <span class="arduino-number">0</span>;
+
+  <span class="arduino-keyword">String</span> jsonRecords = <span class="arduino-string">"["</span>;
+
+  <span class="arduino-keyword">if</span> (LittleFS.exists(
+          FILE_ATTENDANCE)) {
+
+    <span class="arduino-type">File</span> file =
+        LittleFS.open(
+            FILE_ATTENDANCE,
+            <span class="arduino-string">"r"</span>);
+
+    <span class="arduino-keyword">bool</span> first = <span class="arduino-keyword">true</span>;
+
+    <span class="arduino-keyword">while</span> (file.available()) {
+
+      <span class="arduino-keyword">String</span> line =
+          file.readStringUntil(<span class="arduino-string">'\n'</span>);
+
+      line.trim();
+
+      <span class="arduino-keyword">if</span> (line.startsWith(<span class="arduino-string">"date,"</span>) ||
+          line.length() == <span class="arduino-number">0</span>) {
+
+        <span class="arduino-keyword">continue</span>;
+      }
+
+      <span class="arduino-keyword">int</span> p1 =
+          line.indexOf(<span class="arduino-string">','</span>);
+
+      <span class="arduino-keyword">int</span> p2 =
+          line.indexOf(<span class="arduino-string">','</span>, p1 + <span class="arduino-number">1</span>);
+
+      <span class="arduino-keyword">int</span> p3 =
+          line.indexOf(<span class="arduino-string">','</span>, p2 + <span class="arduino-number">1</span>);
+
+      <span class="arduino-keyword">int</span> p4 =
+          line.lastIndexOf(<span class="arduino-string">','</span>);
+
+      <span class="arduino-keyword">if</span> (p1 &lt; <span class="arduino-number">0</span> ||
+          p2 &lt; <span class="arduino-number">0</span> ||
+          p3 &lt; <span class="arduino-number">0</span> ||
+          p4 &lt; <span class="arduino-number">0</span>) {
+
+        <span class="arduino-keyword">continue</span>;
+      }
+
+      <span class="arduino-keyword">int</span> recID =
+          line.substring(
+                  p2 + <span class="arduino-number">1</span>,
+                  p3)
+              .toInt();
+
+      <span class="arduino-keyword">if</span> (recID != id) {
+        <span class="arduino-keyword">continue</span>;
+      }
+
+      <span class="arduino-keyword">String</span> date =
+          line.substring(
+              <span class="arduino-number">0</span>,
+              p1);
+
+      <span class="arduino-keyword">String</span> time =
+          line.substring(
+              p1 + <span class="arduino-number">1</span>,
+              p2);
+
+      <span class="arduino-keyword">String</span> status =
+          line.substring(
+              p4 + <span class="arduino-number">1</span>);
+
+      <span class="arduino-keyword">if</span> (status == <span class="arduino-string">"Hadir"</span>) {
+        present++;
+      }
+
+      <span class="arduino-keyword">if</span> (status == <span class="arduino-string">"Terlambat"</span>) {
+        late++;
+      }
+
+      <span class="arduino-keyword">if</span> (!first) {
+        jsonRecords += <span class="arduino-string">","</span>;
+      }
+
+      first = <span class="arduino-keyword">false</span>;
+
+      jsonRecords += <span class="arduino-string">"{"</span>;
+
+      jsonRecords +=
+          <span class="arduino-string">"\"date\":\""</span> +
+          date + <span class="arduino-string">"\","</span>;
+
+      jsonRecords +=
+          <span class="arduino-string">"\"time\":\""</span> +
+          time + <span class="arduino-string">"\","</span>;
+
+      jsonRecords +=
+          <span class="arduino-string">"\"status\":\""</span> +
+          status + <span class="arduino-string">"\""</span>;
+
+      jsonRecords += <span class="arduino-string">"}"</span>;
+    }
+
+    file.close();
+  }
+
+  jsonRecords += <span class="arduino-string">"]"</span>;
+
+  <span class="arduino-keyword">int</span> total =
+      present + late;
+
+  <span class="arduino-keyword">int</span> absent = <span class="arduino-number">0</span>;
+
+  <span class="arduino-comment">// Hari berjalan sampai hari ini</span>
+  <span class="arduino-keyword">struct</span> tm timeinfo;
+
+  <span class="arduino-keyword">int</span> daysPassed = <span class="arduino-number">0</span>;
+
+  <span class="arduino-keyword">if</span> (getLocalTime(&amp;timeinfo)) {
+
+    daysPassed =
+        timeinfo.tm_yday + <span class="arduino-number">1</span>;
+  }
+
+  <span class="arduino-comment">// Tidak menghitung seluruh tahun sebagai hari sekolah.</span>
+  <span class="arduino-comment">// Minimal menggunakan jumlah hari absensi aktual.</span>
+  absent =
+      studentCount &gt; <span class="arduino-number">0</span>
+      ? <span class="arduino-number">0</span>
+      : <span class="arduino-number">0</span>;
+
+  <span class="arduino-keyword">float</span> percentage = <span class="arduino-number">0</span>;
+
+  <span class="arduino-keyword">if</span> (total &gt; <span class="arduino-number">0</span>) {
+
+    percentage =
+        ((<span class="arduino-keyword">float</span>)total /
+         (<span class="arduino-keyword">float</span>)total) *
+        <span class="arduino-number">100.0</span>;
+  }
+
+  <span class="arduino-keyword">String</span> json = <span class="arduino-string">"{"</span>;
+
+  json +=
+      <span class="arduino-string">"\"name\":\""</span> +
+      jsonEscape(
+        students[index].name) +
+      <span class="arduino-string">"\","</span>;
+
+  json +=
+      <span class="arduino-string">"\"present\":"</span> +
+      <span class="arduino-keyword">String</span>(present) +
+      <span class="arduino-string">","</span>;
+
+  json +=
+      <span class="arduino-string">"\"late\":"</span> +
+      <span class="arduino-keyword">String</span>(late) +
+      <span class="arduino-string">","</span>;
+
+  json +=
+      <span class="arduino-string">"\"absent\":"</span> +
+      <span class="arduino-keyword">String</span>(absent) +
+      <span class="arduino-string">","</span>;
+
+  json +=
+      <span class="arduino-string">"\"percentage\":"</span> +
+      <span class="arduino-keyword">String</span>(percentage, <span class="arduino-number">2</span>) +
+      <span class="arduino-string">","</span>;
+
+  json +=
+      <span class="arduino-string">"\"records\":"</span> +
+      jsonRecords;
+
+  json += <span class="arduino-string">"}"</span>;
+
+  server.send(
+      <span class="arduino-number">200</span>,
+      <span class="arduino-string">"application/json"</span>,
+      json);
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// API REKAP BULANAN</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">void</span> handleMonthly() {
+
+  <span class="arduino-keyword">if</span> (!server.hasArg(<span class="arduino-string">"month"</span>)) {
+
+    server.send(
+        <span class="arduino-number">400</span>,
+        <span class="arduino-string">"text/plain"</span>,
+        <span class="arduino-string">"Bulan tidak dipilih"</span>);
+
+    <span class="arduino-keyword">return</span>;
+  }
+
+  <span class="arduino-keyword">String</span> month =
+      server.arg(<span class="arduino-string">"month"</span>);
+
+  <span class="arduino-keyword">String</span> json = <span class="arduino-string">"["</span>;
+
+  <span class="arduino-keyword">bool</span> firstStudent = <span class="arduino-keyword">true</span>;
+
+  <span class="arduino-keyword">for</span> (<span class="arduino-keyword">int</span> s = <span class="arduino-number">0</span>;
+       s &lt; studentCount;
+       s++) {
+
+    <span class="arduino-keyword">int</span> present = <span class="arduino-number">0</span>;
+    <span class="arduino-keyword">int</span> late = <span class="arduino-number">0</span>;
+
+    <span class="arduino-keyword">if</span> (LittleFS.exists(
+            FILE_ATTENDANCE)) {
+
+      <span class="arduino-type">File</span> file =
+          LittleFS.open(
+              FILE_ATTENDANCE,
+              <span class="arduino-string">"r"</span>);
+
+      <span class="arduino-keyword">while</span> (file.available()) {
+
+        <span class="arduino-keyword">String</span> line =
+            file.readStringUntil(<span class="arduino-string">'\n'</span>);
+
+        line.trim();
+
+        <span class="arduino-keyword">if</span> (line.startsWith(<span class="arduino-string">"date,"</span>) ||
+            line.length() == <span class="arduino-number">0</span>) {
+
+          <span class="arduino-keyword">continue</span>;
+        }
+
+        <span class="arduino-keyword">int</span> p1 =
+            line.indexOf(<span class="arduino-string">','</span>);
+
+        <span class="arduino-keyword">int</span> p2 =
+            line.indexOf(<span class="arduino-string">','</span>, p1 + <span class="arduino-number">1</span>);
+
+        <span class="arduino-keyword">int</span> p3 =
+            line.indexOf(<span class="arduino-string">','</span>, p2 + <span class="arduino-number">1</span>);
+
+        <span class="arduino-keyword">int</span> p4 =
+            line.lastIndexOf(<span class="arduino-string">','</span>);
+
+        <span class="arduino-keyword">if</span> (p1 &lt; <span class="arduino-number">0</span> ||
+            p2 &lt; <span class="arduino-number">0</span> ||
+            p3 &lt; <span class="arduino-number">0</span> ||
+            p4 &lt; <span class="arduino-number">0</span>) {
+
+          <span class="arduino-keyword">continue</span>;
+        }
+
+        <span class="arduino-keyword">String</span> date =
+            line.substring(
+                <span class="arduino-number">0</span>,
+                p1);
+
+        <span class="arduino-keyword">if</span> (!date.startsWith(
+                month)) {
+
+          <span class="arduino-keyword">continue</span>;
+        }
+
+        <span class="arduino-keyword">int</span> id =
+            line.substring(
+                    p2 + <span class="arduino-number">1</span>,
+                    p3)
+                .toInt();
+
+        <span class="arduino-keyword">if</span> (id !=
+            students[s].id) {
+
+          <span class="arduino-keyword">continue</span>;
+        }
+
+        <span class="arduino-keyword">String</span> status =
+            line.substring(
+                p4 + <span class="arduino-number">1</span>);
+
+        <span class="arduino-keyword">if</span> (status ==
+            <span class="arduino-string">"Hadir"</span>) {
+
+          present++;
+
+        } <span class="arduino-keyword">else</span> <span class="arduino-keyword">if</span> (
+            status ==
+            <span class="arduino-string">"Terlambat"</span>) {
+
+          late++;
+        }
+      }
+
+      file.close();
+    }
+
+    <span class="arduino-keyword">int</span> total =
+        present + late;
+
+    <span class="arduino-comment">// Untuk rekap bulanan,</span>
+    <span class="arduino-comment">// hari tidak hadir dihitung</span>
+    <span class="arduino-comment">// berdasarkan hari kalender</span>
+    <span class="arduino-comment">// yang sudah berjalan pada bulan tersebut.</span>
+    <span class="arduino-keyword">int</span> absent = <span class="arduino-number">0</span>;
+
+    <span class="arduino-keyword">float</span> percentage = <span class="arduino-number">0</span>;
+
+    <span class="arduino-keyword">if</span> (total &gt; <span class="arduino-number">0</span>) {
+
+      percentage =
+          ((<span class="arduino-keyword">float</span>)total /
+           (<span class="arduino-keyword">float</span>)total) *
+          <span class="arduino-number">100.0</span>;
+    }
+
+    <span class="arduino-keyword">if</span> (!firstStudent) {
+      json += <span class="arduino-string">","</span>;
+    }
+
+    firstStudent = <span class="arduino-keyword">false</span>;
+
+    json += <span class="arduino-string">"{"</span>;
+
+    json +=
+        <span class="arduino-string">"\"name\":\""</span> +
+        jsonEscape(
+          students[s].name) +
+        <span class="arduino-string">"\","</span>;
+
+    json +=
+        <span class="arduino-string">"\"present\":"</span> +
+        <span class="arduino-keyword">String</span>(present) +
+        <span class="arduino-string">","</span>;
+
+    json +=
+        <span class="arduino-string">"\"late\":"</span> +
+        <span class="arduino-keyword">String</span>(late) +
+        <span class="arduino-string">","</span>;
+
+    json +=
+        <span class="arduino-string">"\"absent\":"</span> +
+        <span class="arduino-keyword">String</span>(absent) +
+        <span class="arduino-string">","</span>;
+
+    json +=
+        <span class="arduino-string">"\"percentage\":"</span> +
+        <span class="arduino-keyword">String</span>(percentage, <span class="arduino-number">2</span>);
+
+    json += <span class="arduino-string">"}"</span>;
+  }
+
+  json += <span class="arduino-string">"]"</span>;
+
+  server.send(
+      <span class="arduino-number">200</span>,
+      <span class="arduino-string">"application/json"</span>,
+      json);
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// SETTINGS API</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">void</span> handleGetSettings() {
+
+  <span class="arduino-keyword">String</span> timeValue =
+      twoDigit(jamMasuk) +
+      <span class="arduino-string">":"</span> +
+      twoDigit(menitMasuk);
+
+  <span class="arduino-keyword">bool</span> timeOK =
+      getDate() !=
+      <span class="arduino-string">"0000-00-00"</span>;
+
+  <span class="arduino-keyword">String</span> json = <span class="arduino-string">"{"</span>;
+
+  json +=
+      <span class="arduino-string">"\"time\":\""</span> +
+      timeValue +
+      <span class="arduino-string">"\","</span>;
+
+  json +=
+      <span class="arduino-string">"\"ntp\":\""</span> +
+      <span class="arduino-keyword">String</span>(
+        timeOK
+        ? <span class="arduino-string">"Tersinkron"</span>
+        : <span class="arduino-string">"Belum tersinkron"</span>) +
+      <span class="arduino-string">"\""</span>;
+
+  json += <span class="arduino-string">"}"</span>;
+
+  server.send(
+      <span class="arduino-number">200</span>,
+      <span class="arduino-string">"application/json"</span>,
+      json);
+}
+
+<span class="arduino-keyword">void</span> handleSaveSettings() {
+
+  <span class="arduino-keyword">if</span> (!server.hasArg(<span class="arduino-string">"time"</span>)) {
+
+    server.send(
+        <span class="arduino-number">400</span>,
+        <span class="arduino-string">"text/plain"</span>,
+        <span class="arduino-string">"Jam tidak ditemukan"</span>);
+
+    <span class="arduino-keyword">return</span>;
+  }
+
+  <span class="arduino-keyword">String</span> value =
+      server.arg(<span class="arduino-string">"time"</span>);
+
+  <span class="arduino-keyword">if</span> (value.length() != <span class="arduino-number">5</span>) {
+
+    server.send(
+        <span class="arduino-number">400</span>,
+        <span class="arduino-string">"text/plain"</span>,
+        <span class="arduino-string">"Format jam salah"</span>);
+
+    <span class="arduino-keyword">return</span>;
+  }
+
+  jamMasuk =
+      value.substring(
+          <span class="arduino-number">0</span>, <span class="arduino-number">2</span>).toInt();
+
+  menitMasuk =
+      value.substring(
+          <span class="arduino-number">3</span>, <span class="arduino-number">5</span>).toInt();
+
+  saveSettings();
+
+  server.send(
+      <span class="arduino-number">200</span>,
+      <span class="arduino-string">"text/plain"</span>,
+      <span class="arduino-string">"Jam masuk berhasil disimpan: "</span> +
+      value);
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// WIFI</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">void</span> startWiFi() {
+
+  <span class="arduino-comment">// AP</span>
+  <span class="arduino-type">WiFi</span>.mode(WIFI_AP_STA);
+
+  <span class="arduino-type">WiFi</span>.softAP(
+      AP_SSID,
+      AP_PASSWORD);
+
+  Serial.println();
+  Serial.println(
+      <span class="arduino-string">"================================"</span>);
+
+  Serial.println(
+      <span class="arduino-string">"ACCESS POINT AKTIF"</span>);
+
+  Serial.print(
+      <span class="arduino-string">"SSID: "</span>);
+
+  Serial.println(
+      AP_SSID);
+
+  Serial.print(
+      <span class="arduino-string">"Password: "</span>);
+
+  Serial.println(
+      AP_PASSWORD);
+
+  Serial.print(
+      <span class="arduino-string">"IP Dashboard: "</span>);
+
+  Serial.println(
+      <span class="arduino-type">WiFi</span>.softAPIP());
+
+  <span class="arduino-comment">// STA</span>
+  <span class="arduino-keyword">if</span> (strlen(WIFI_SSID) &gt; <span class="arduino-number">0</span>) {
+
+    <span class="arduino-type">WiFi</span>.begin(
+        WIFI_SSID,
+        WIFI_PASSWORD);
+
+    Serial.print(
+        <span class="arduino-string">"Menghubungkan WiFi sekolah"</span>);
+
+    unsigned <span class="arduino-keyword">long</span> start =
+        <span class="arduino-function">millis</span>();
+
+    <span class="arduino-keyword">while</span> (
+        <span class="arduino-type">WiFi</span>.status() !=
+        WL_CONNECTED &amp;&amp;
+        <span class="arduino-function">millis</span>() - start &lt;
+        <span class="arduino-number">15000</span>) {
+
+      <span class="arduino-function">delay</span>(<span class="arduino-number">500</span>);
+
+      Serial.print(<span class="arduino-string">"."</span>);
+    }
+
+    Serial.println();
+
+    <span class="arduino-keyword">if</span> (<span class="arduino-type">WiFi</span>.status() ==
+        WL_CONNECTED) {
+
+      Serial.print(
+          <span class="arduino-string">"WiFi sekolah OK. IP: "</span>);
+
+      Serial.println(
+          <span class="arduino-type">WiFi</span>.localIP());
+
+    } <span class="arduino-keyword">else</span> {
+
+      Serial.println(
+          <span class="arduino-string">"WiFi sekolah gagal."</span>);
+    }
+  }
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// NTP</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">void</span> setupNTP() {
+
+  configTime(
+      GMT_OFFSET_SEC,
+      DAYLIGHT_OFFSET_SEC,
+      NTP_SERVER_1,
+      NTP_SERVER_2);
+
+  Serial.println(
+      <span class="arduino-string">"Sinkronisasi NTP..."</span>);
+
+  <span class="arduino-keyword">struct</span> tm timeinfo;
+
+  <span class="arduino-keyword">for</span> (<span class="arduino-keyword">int</span> i = <span class="arduino-number">0</span>;
+       i &lt; <span class="arduino-number">20</span>;
+       i++) {
+
+    <span class="arduino-keyword">if</span> (getLocalTime(
+            &amp;timeinfo)) {
+
+      Serial.println(
+          <span class="arduino-string">"NTP berhasil."</span>);
+
+      Serial.printf(
+          <span class="arduino-string">"%04d-%02d-%02d %02d:%02d:%02d\n"</span>,
+          timeinfo.tm_year + <span class="arduino-number">1900</span>,
+          timeinfo.tm_mon + <span class="arduino-number">1</span>,
+          timeinfo.tm_mday,
+          timeinfo.tm_hour,
+          timeinfo.tm_min,
+          timeinfo.tm_sec);
+
+      <span class="arduino-keyword">return</span>;
+    }
+
+    <span class="arduino-function">delay</span>(<span class="arduino-number">500</span>);
+
+    Serial.print(<span class="arduino-string">"."</span>);
+  }
+
+  Serial.println();
+
+  Serial.println(
+      <span class="arduino-string">"NTP belum tersinkron."</span>);
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// WEB SERVER</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">void</span> setupWebServer() {
+
+  server.on(
+      <span class="arduino-string">"/"</span>,
+      HTTP_GET,
+      handleRoot);
+
+  server.on(
+      <span class="arduino-string">"/api/students"</span>,
+      HTTP_GET,
+      handleStudents);
+
+  server.on(
+      <span class="arduino-string">"/api/addStudent"</span>,
+      HTTP_POST,
+      handleAddStudent);
+
+  server.on(
+      <span class="arduino-string">"/api/deleteStudent"</span>,
+      HTTP_GET,
+      handleDeleteStudent);
+
+  server.on(
+      <span class="arduino-string">"/api/dashboard"</span>,
+      HTTP_GET,
+      handleDashboard);
+
+  server.on(
+      <span class="arduino-string">"/api/studentReport"</span>,
+      HTTP_GET,
+      handleStudentReport);
+
+  server.on(
+      <span class="arduino-string">"/api/monthly"</span>,
+      HTTP_GET,
+      handleMonthly);
+
+  server.on(
+      <span class="arduino-string">"/api/settings"</span>,
+      HTTP_GET,
+      handleGetSettings);
+
+  server.on(
+      <span class="arduino-string">"/api/settings"</span>,
+      HTTP_POST,
+      handleSaveSettings);
+
+  server.begin();
+
+  Serial.println(
+      <span class="arduino-string">"Web Server aktif."</span>);
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// SETUP</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">void</span> <span class="arduino-function">setup</span>() {
+
+  Serial.begin(<span class="arduino-number">115200</span>);
+
+  <span class="arduino-comment">// GPIO</span>
+  <span class="arduino-function">pinMode</span>(
+      BUZZER_PIN,
+      OUTPUT);
+
+  <span class="arduino-function">pinMode</span>(
+      LED_GREEN,
+      OUTPUT);
+
+  <span class="arduino-function">pinMode</span>(
+      LED_RED,
+      OUTPUT);
+
+  <span class="arduino-function">digitalWrite</span>(
+      LED_GREEN,
+      LOW);
+
+  <span class="arduino-function">digitalWrite</span>(
+      LED_RED,
+      LOW);
+
+  <span class="arduino-comment">// LCD</span>
+  Wire.begin(
+      <span class="arduino-number">21</span>,
+      <span class="arduino-number">22</span>);
+
+  lcd.init();
+
+  lcd.backlight();
+
+  lcdMessage(
+      <span class="arduino-string">"ABSENSI SEKOLAH"</span>,
+      <span class="arduino-string">"Memulai..."</span>);
+
+  <span class="arduino-comment">// LittleFS</span>
+  <span class="arduino-keyword">if</span> (!LittleFS.begin(<span class="arduino-keyword">true</span>)) {
+
+    lcdMessage(
+        <span class="arduino-string">"LittleFS ERROR"</span>,
+        <span class="arduino-string">"Restart..."</span>);
+
+    <span class="arduino-function">delay</span>(<span class="arduino-number">3000</span>);
+
+    ESP.restart();
+  }
+
+  loadSettings();
+
+  loadStudents();
+
+  createAttendanceFile();
+
+  <span class="arduino-comment">// WiFi</span>
+  startWiFi();
+
+  <span class="arduino-comment">// NTP</span>
+  setupNTP();
+
+  <span class="arduino-comment">// Fingerprint</span>
+  FingerSerial.begin(
+      <span class="arduino-number">57600</span>,
+      SERIAL_8N1,
+      FP_RX,
+      FP_TX);
+
+  finger.begin(<span class="arduino-number">57600</span>);
+
+  <span class="arduino-keyword">if</span> (finger.verifyPassword()) {
+
+    Serial.println(
+        <span class="arduino-string">"Fingerprint AS608 OK."</span>);
+
+    lcdMessage(
+        <span class="arduino-string">"Fingerprint OK"</span>,
+        <span class="arduino-string">"Sistem Siap"</span>);
+
+  } <span class="arduino-keyword">else</span> {
+
+    Serial.println(
+        <span class="arduino-string">"Fingerprint tidak terdeteksi."</span>);
+
+    lcdMessage(
+        <span class="arduino-string">"Fingerprint"</span>,
+        <span class="arduino-string">"Tidak Terdeteksi"</span>);
+
+    <span class="arduino-function">delay</span>(<span class="arduino-number">2000</span>);
+  }
+
+  <span class="arduino-comment">// Web</span>
+  setupWebServer();
+
+  <span class="arduino-function">delay</span>(<span class="arduino-number">1500</span>);
+
+  lcdMessage(
+      <span class="arduino-string">"Tempelkan Jari"</span>,
+      <span class="arduino-string">"Silakan Absen"</span>);
+
+  Serial.println();
+  Serial.println(
+      <span class="arduino-string">"================================"</span>);
+
+  Serial.println(
+      <span class="arduino-string">"SISTEM ABSENSI SEKOLAH SIAP"</span>);
+
+  Serial.print(
+      <span class="arduino-string">"Batas masuk: "</span>);
+
+  Serial.print(
+      twoDigit(jamMasuk));
+
+  Serial.print(<span class="arduino-string">":"</span>);
+
+  Serial.println(
+      twoDigit(menitMasuk));
+
+  Serial.println(
+      <span class="arduino-string">"================================"</span>);
+}
+
+<span class="arduino-comment">// ============================================================</span>
+<span class="arduino-comment">// LOOP</span>
+<span class="arduino-comment">// ============================================================</span>
+
+<span class="arduino-keyword">void</span> <span class="arduino-function">loop</span>() {
+
+  server.handleClient();
+
+  <span class="arduino-comment">// Hanya lakukan fingerprint</span>
+  <span class="arduino-comment">// jika tidak sedang enrollment.</span>
+  <span class="arduino-keyword">if</span> (!enrollmentRunning) {
+
+    processFingerprint();
+  }
+
+  <span class="arduino-function">delay</span>(<span class="arduino-number">50</span>);
+}
+</code></pre>
+    </div>
+</div>
+</body>
+</html>
